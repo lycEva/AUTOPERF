@@ -1,0 +1,3 @@
+# Core CLI uses only the Python standard library.
+# Optional PNG report generation:
+# matplotlib>=3.5

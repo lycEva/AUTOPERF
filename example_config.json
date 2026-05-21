@@ -1,0 +1,12 @@
+{
+  "container": "ai-fs-serving",
+  "server_name": "fs",
+  "server_config": "/root/test/server_config.json",
+  "service_workers": 4,
+  "service_threads": 8,
+  "threads": 50,
+  "duration": 600,
+  "output": "/root/test/results",
+  "run_scripts": "/root/test/run_scripts",
+  "ready_log_pattern": "Booting worker"
+}

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autoperf-cli"
+version = "0.1.0"
+description = "Docker + JMeter + Ascend NPU automated performance test CLI"
+requires-python = ">=3.8"
+readme = "README.md"
+authors = [{ name = "AutoPerf" }]
+dependencies = []
+
+[project.optional-dependencies]
+png = ["matplotlib>=3.5"]
+
+[project.scripts]
+autoperf = "autoperf.cli:main"
+
+[tool.setuptools]
+packages = ["autoperf"]
+
+[tool.setuptools.package-data]
+autoperf = []
