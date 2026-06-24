@@ -6,6 +6,9 @@ workers="${2:-1}"
 
 if [ -z "$container" ]; then echo 0; exit 0; fi
 
+worker_pids="$(printf '%s\n' "${AUTOPERF_MONITOR_PIDS:-}" | tr ',' '\n' | awk 'NF {print $1}')"
+
+if [ -z "$worker_pids" ]; then
 worker_pids="$(docker top "$container" 2>/dev/null | awk -v limit="$workers" '
   NR > 1 {
     if (($4 + 0) <= 0) next
@@ -14,6 +17,7 @@ worker_pids="$(docker top "$container" 2>/dev/null | awk -v limit="$workers" '
     print $2, sec
   }
 ' | sort -k2 -nr | head -n "$workers" | awk '{print $1}')"
+fi
 
 if [ -z "$worker_pids" ]; then
   root_pid="$(docker inspect -f '{{.State.Pid}}' "$container" 2>/dev/null || true)"

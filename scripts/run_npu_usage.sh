@@ -82,6 +82,9 @@ if ! command -v npu-smi >/dev/null 2>&1; then echo 0; exit 0; fi
 
 log "container=$container workers=$workers device_info=${device_info:-<empty>}"
 
+top_pids="$(printf '%s\n' "${AUTOPERF_MONITOR_PIDS:-}" | tr ',' '\n' | awk 'NF {print $1}')"
+
+if [ -z "$top_pids" ]; then
 top_pids="$(docker top "$container" 2>/dev/null | awk -v limit="$workers" '
   NR > 1 {
     if (($4 + 0) <= 0) next
@@ -90,6 +93,7 @@ top_pids="$(docker top "$container" 2>/dev/null | awk -v limit="$workers" '
     print $2, sec
   }
 ' | sort -k2 -nr | head -n "$workers" | awk '{print $1}')"
+fi
 
 if [ -z "$top_pids" ]; then
   root_pid="$(docker inspect -f '{{.State.Pid}}' "$container" 2>/dev/null || true)"
@@ -100,13 +104,16 @@ fi
 log "top_pids=$(printf '%s' "$top_pids" | tr '\n' ',' | sed 's/,$//')"
 if [ -z "$top_pids" ]; then echo 0; exit 0; fi
 
-match_pids="$top_pids"
-for pid in $top_pids; do
-  descendants="$(collect_descendants "$pid")"
-  if [ -n "$descendants" ]; then
-    match_pids="$(printf '%s\n%s\n' "$match_pids" "$descendants")"
-  fi
-done
+match_pids="$(printf '%s\n' "${AUTOPERF_MONITOR_RELATED_PIDS:-}" | tr ',' '\n' | awk 'NF {print $1}')"
+if [ -z "$match_pids" ]; then
+  match_pids="$top_pids"
+  for pid in $top_pids; do
+    descendants="$(collect_descendants "$pid")"
+    if [ -n "$descendants" ]; then
+      match_pids="$(printf '%s\n%s\n' "$match_pids" "$descendants")"
+    fi
+  done
+fi
 match_pids="$(printf '%s\n' "$match_pids" | awk 'NF {print $1}' | sort -n | uniq)"
 log "match_pids=$(printf '%s' "$match_pids" | tr '\n' ',' | sed 's/,$//')"
 

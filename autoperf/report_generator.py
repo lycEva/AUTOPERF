@@ -76,14 +76,49 @@ def _time_labels(rows: list[dict]) -> list[float]:
     return [round((current - start).total_seconds() / 60, 2) for current in parsed_times]
 
 
+def _time_axis_limit(labels: list[float]) -> float:
+    if not labels:
+        return 1.0
+    return max(max(labels), 1.0)
+
+
+def _line_points(labels: list[float], values: list[float], x_limit: float) -> tuple[list[float], list[float]]:
+    if values and all(value == values[0] for value in values):
+        return [0.0, x_limit], [values[0], values[0]]
+    return labels, values
+
+
+def _y_axis_bounds(values: list[float]) -> tuple[float, float]:
+    lower = min(min(values), 0.0)
+    upper = max(max(values), 1.0)
+    padding = max((upper - lower) * 0.08, abs(upper) * 0.08, 1.0)
+    return lower, upper + padding
+
+
 def generate_html_report(csv_file: Path, output_file: Path) -> Path:
     rows = _read_monitor_csv(csv_file)
     labels = _time_labels(rows)
+    x_limit = _time_axis_limit(labels)
     stats = {key: _stats(rows, key) for key, _ in METRICS}
     series = {key: [row[key] for row in rows] for key, _ in METRICS}
+    line_series = {}
+    for key, values in series.items():
+        line_labels, line_values = _line_points(labels, values, x_limit)
+        line_series[key] = {"labels": line_labels, "values": line_values}
+    y_axes = {key: dict(zip(("min", "max"), _y_axis_bounds(values))) for key, values in series.items()}
     peaks = {key: _peak(labels, values) for key, values in series.items()}
     metric_titles = {key: title for key, title in METRICS}
-    payload = json.dumps({"labels": labels, "series": series, "peaks": peaks}, ensure_ascii=False)
+    payload = json.dumps(
+        {
+            "labels": labels,
+            "series": series,
+            "lineSeries": line_series,
+            "yAxes": y_axes,
+            "peaks": peaks,
+            "xLimit": x_limit,
+        },
+        ensure_ascii=False,
+    )
 
     charts = []
     for key, title in METRICS:
@@ -152,10 +187,14 @@ function drawChart(canvas, values, title) {{
   ctx.fillRect(0, 0, w, h);
   ctx.strokeStyle = '#d6dde8';
   ctx.lineWidth = 1;
-  const max = Math.max(...values, 1);
-  const min = Math.min(...values, 0);
+  const yAxis = data.yAxes[canvas.id] || {{
+    min: Math.min(...values, 0),
+    max: Math.max(...values, 1)
+  }};
+  const max = yAxis.max;
+  const min = yAxis.min;
   const span = Math.max(max - min, 1);
-  const xMax = Math.max(...data.labels, 0);
+  const xMax = Math.max(data.xLimit || 0, ...data.labels, 0);
   const xSpan = xMax > 0 ? xMax : 1;
   ctx.setLineDash([2, 2]);
   ctx.fillStyle = '#1f2933';
@@ -183,8 +222,9 @@ function drawChart(canvas, values, title) {{
   ctx.strokeStyle = '#ff40ff';
   ctx.lineWidth = 1.2;
   ctx.beginPath();
-  values.forEach((v, idx) => {{
-    const x = plot.left + (data.labels[idx] / xSpan) * plotW;
+  const line = data.lineSeries[canvas.id] || {{labels: data.labels, values}};
+  line.values.forEach((v, idx) => {{
+    const x = plot.left + (line.labels[idx] / xSpan) * plotW;
     const y = plot.top + plotH - ((v - min) / span) * plotH;
     if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }});
@@ -230,12 +270,15 @@ def generate_png_reports(csv_file: Path, output_dir: Path) -> list[Path]:
         return []
     paths: list[Path] = []
     x_values = _time_labels(rows)
+    x_limit = _time_axis_limit(x_values)
     for key, title in METRICS:
         values = [row[key] for row in rows]
         peak = _peak(x_values, values)
+        line_x_values, line_values = _line_points(x_values, values, x_limit)
+        y_min, y_max = _y_axis_bounds(values)
         fig, ax = plt.subplots(figsize=(10, 3.2), facecolor="#eef6ff")
         ax.set_facecolor("#eef6ff")
-        ax.plot(x_values, values, color="#ff40ff", linewidth=1.0, label=f"127.0.0.1 {title}")
+        ax.plot(line_x_values, line_values, color="#ff40ff", linewidth=1.0, label=f"127.0.0.1 {title}")
         ax.scatter([peak["time"]], [peak["value"]], color="#dc2626", zorder=3)
         ax.annotate(
             f"peak: {peak['value']:.2f}",
@@ -248,8 +291,8 @@ def generate_png_reports(csv_file: Path, output_dir: Path) -> list[Path]:
         ax.legend(loc="upper left", frameon=False, fontsize=8)
         ax.set_xlabel("Elapsed time")
         ax.set_ylabel("Performance Metrics")
-        ax.set_xlim(left=0)
-        ax.set_ylim(bottom=0)
+        ax.set_xlim(0, x_limit)
+        ax.set_ylim(y_min, y_max)
         ax.set_xticks(ax.get_xticks())
         ax.set_xticklabels([_format_elapsed(float(value)) for value in ax.get_xticks()], fontsize=7)
         ax.tick_params(axis="y", labelsize=7)

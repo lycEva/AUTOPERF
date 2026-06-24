@@ -26,6 +26,7 @@ from .jmeter_runner import run_jmeter
 from .jmx_editor import prepare_modified_jmx, update_jmx
 from .logger import error, info, ok, setup_logger, warn
 from .monitor import (
+    DEFAULT_MONITOR_TIMEOUT_SECONDS,
     MIN_MONITOR_INTERVAL_SECONDS,
     MonitorLoop,
     SCRIPT_NAMES,
@@ -81,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
     test_monitor.add_argument("--run-scripts", default=str(DEFAULT_SCRIPTS_DIR))
     test_monitor.add_argument("--workers", type=_positive_arg("--workers"))
     test_monitor.add_argument("--server-config", help="read workers from server_config.json")
+    test_monitor.add_argument(
+        "--monitor-timeout",
+        default=DEFAULT_MONITOR_TIMEOUT_SECONDS,
+        type=_positive_arg("--monitor-timeout"),
+    )
     test_monitor.set_defaults(func=cmd_test_monitor)
 
     check = sub.add_parser("check", help="check environment")
@@ -142,6 +148,11 @@ def _add_common_run_args(parser: argparse.ArgumentParser, *, include_service: bo
     parser.add_argument("--output", required=True)
     parser.add_argument("--run-scripts", default=str(DEFAULT_SCRIPTS_DIR))
     parser.add_argument("--interval", default=0.1, type=_interval_arg("--interval"))
+    parser.add_argument(
+        "--monitor-timeout",
+        default=DEFAULT_MONITOR_TIMEOUT_SECONDS,
+        type=_positive_arg("--monitor-timeout"),
+    )
     parser.add_argument("--npu-smi")
     parser.add_argument("--test-name")
     parser.add_argument("--force", action="store_true")
@@ -196,7 +207,16 @@ def cmd_run(args) -> int:
         _write_config(cfg.output_dir / "config.json", config_data)
 
         info(logger, "Starting monitor loop")
-        monitor = MonitorLoop(cfg.run_scripts, cfg.container, cfg.service_workers, "", cfg.monitor_csv, cfg.interval, logger)
+        monitor = MonitorLoop(
+            cfg.run_scripts,
+            cfg.container,
+            cfg.service_workers,
+            "",
+            cfg.monitor_csv,
+            cfg.interval,
+            logger,
+            timeout=cfg.monitor_timeout,
+        )
         monitor.start()
         code = run_jmeter(
             jmeter_bin=cfg.jmeter_bin,
@@ -243,7 +263,13 @@ def cmd_test_monitor(args) -> int:
         workers = int(load_server_config(Path(args.server_config).resolve())["workers"])
     if workers is None:
         workers = 1
-    values = run_monitor_once(Path(args.run_scripts).resolve(), args.container, workers, logger)
+    values = run_monitor_once(
+        Path(args.run_scripts).resolve(),
+        args.container,
+        workers,
+        logger,
+        timeout=args.monitor_timeout,
+    )
     ok(logger, f"Monitor test passed: {values}")
     return 0
 

@@ -1,0 +1,2 @@
+[console_scripts]
+autoperf = autoperf.cli:main

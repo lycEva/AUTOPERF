@@ -1,3 +1,13 @@
+Metadata-Version: 2.4
+Name: autoperf-cli
+Version: 0.1.0
+Summary: Docker + JMeter + Ascend NPU automated performance test CLI
+Author: AutoPerf
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Provides-Extra: png
+Requires-Dist: matplotlib>=3.5; extra == "png"
+
 # autoperf-cli
 
 `autoperf-cli` 是一个用于 ARM64/AArch64 + 华为 Ascend 310P 环境的自动化性能测试 CLI 工具。
@@ -13,6 +23,7 @@
 - 监控方式：自定义 shell 脚本
 - Python：3.8+
 
+ARM64 + Ascend 310P 环境下，JMeter PerfMon / ServerAgent 插件经常不可用或兼容性较差，因此本项目不依赖 JMeter 自带监控插件。
 
 ## 安装
 
@@ -33,8 +44,7 @@ autoperf --help
 如果 `pip install -e .` 成功，但提示 `autoperf: command not found`，通常是用户级安装目录没有加入 `PATH`，可以执行：
 
 ```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
 如果不想安装，也可以在项目根目录直接用模块方式运行：
@@ -70,8 +80,6 @@ autoperf run \
   --duration 600 \
   --output /root/test/results \
   --run-scripts /root/test/run_scripts \
-  --interval 2 \
-  --monitor-timeout 60 \
   --ready-log-pattern "Booting worker"
 ```
 
@@ -183,9 +191,7 @@ autoperf update-server-config \
 ```bash
 autoperf test-monitor \
   --container ai-fs-serving \
-  --workers 15 \
-  --run-scripts scripts \
-  --monitor-timeout 60
+  --run-scripts scripts
 ```
 
 环境检查：
@@ -225,18 +231,6 @@ autoperf update-scripts \
 
 为了避免高频调用 `docker top` 和 `npu-smi` 造成额外压力，最小有效间隔是 `0.05` 秒。低于该值的配置会自动按 `0.05` 秒执行；例如 `--interval 0.003` 实际会按 50ms 采样。
 
-监控脚本单次执行超时时间通过 `--monitor-timeout` 控制，默认 `60` 秒。多 worker 场景下建议先用 `test-monitor` 验证监控耗时，再启动完整压测：
-
-```bash
-autoperf test-monitor \
-  --container ai-fs-serving \
-  --workers 15 \
-  --run-scripts scripts \
-  --monitor-timeout 60
-```
-
-当 `--service-workers` 较大时，建议把 `--interval` 调到 `2` 到 `5` 秒，避免监控采样频率过高影响被测服务。CLI 每轮采样会先统一发现 worker PID 和关联子进程 PID，再通过环境变量传给脚本；脚本直接手动运行时仍会走原来的自动发现逻辑。
-
 脚本调用格式：
 
 ```bash
@@ -248,8 +242,8 @@ autoperf test-monitor \
 - 通过参数接收容器名。
 - 不写死容器名。
 - 不写死 PID。
-- CLI 调用时优先使用 `AUTOPERF_MONITOR_PIDS` 和 `AUTOPERF_MONITOR_RELATED_PIDS`，避免重复扫描。
-- 手动执行脚本且未传入上述环境变量时，脚本会自行重新获取容器 root PID 并递归查找子进程 PID。
+- 每次执行都重新获取容器 root PID。
+- 每次执行都递归查找子进程 PID。
 - 单进程场景直接取该进程指标。
 - 多进程场景取所有子进程中的最大值。
 - stdout 只输出一个数字。
