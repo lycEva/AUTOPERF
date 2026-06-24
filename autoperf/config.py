@@ -34,6 +34,7 @@ class RunConfig:
     run_scripts: Path
     jmeter_bin: str
     interval: float
+    monitor_timeout: int
     npu_smi: str | None
     test_name: str
     force: bool
@@ -89,6 +90,7 @@ def build_run_config(args) -> RunConfig:
         run_scripts=Path(args.run_scripts).resolve() if args.run_scripts else DEFAULT_SCRIPTS_DIR.resolve(),
         jmeter_bin=args.jmeter_bin,
         interval=args.interval,
+        monitor_timeout=args.monitor_timeout,
         npu_smi=args.npu_smi,
         test_name=test_name,
         force=args.force,
