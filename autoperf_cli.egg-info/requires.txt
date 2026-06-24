@@ -1,3 +1,0 @@
-
-[png]
-matplotlib>=3.5
