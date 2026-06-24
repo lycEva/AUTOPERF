@@ -1,63 +1,43 @@
 # autoperf-cli
 
-`autoperf-cli` 是一个用于 ARM64/AArch64 + 华为 Ascend 310P 环境的自动化性能测试 CLI 工具。
+`autoperf-cli` 是面向 ARM64/AArch64 + 华为 Ascend 显卡环境的自动化性能测试工具，用于编排服务配置修改、Docker 容器重启、JMeter 压测、脚本监控和结果归档。
 
-它负责完整编排服务配置修改、Docker 容器重启、JMeter 压测、自定义脚本监控和结果归档。JMeter 只负责发起压测请求，CPU、内存、NPU 使用率、NPU 显存占用全部由自定义 shell 脚本采集。
+JMeter 只负责发起压测请求；CPU、内存、NPU 使用率和 NPU 显存占用由自定义 shell 脚本采集。
 
 ## 适用环境
 
-- CPU 架构：ARM64 / AArch64
-- 推理卡：华为 Ascend 310P
-- 服务运行方式：Docker 容器
-- 压测工具：Apache JMeter
-- 监控方式：自定义 shell 脚本
+- CPU：ARM64 / AArch64
+- NPU：华为 Ascend 显卡
+- 服务：Docker 容器
+- 压测：Apache JMeter
 - Python：3.8+
 
 
 ## 安装
 
-如果希望在任意目录直接使用 `autoperf` 命令，先在项目根目录安装：
-
 ```bash
 python3 -m pip install -e .
 chmod +x scripts/*.sh
-```
 
-安装后验证：
-
-```bash
-which autoperf
 autoperf --help
 ```
 
-如果 `pip install -e .` 成功，但提示 `autoperf: command not found`，通常是用户级安装目录没有加入 `PATH`，可以执行：
+将用户级安装目录加入 `PATH`：
 
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-如果不想安装，也可以在项目根目录直接用模块方式运行：
+也可以在项目根目录直接使用模块方式运行：
 
 ```bash
 python3 -m autoperf.cli --help
 ```
 
-注意：模块方式的入口是 `autoperf.cli`，不是 `autoperf`。也就是说应使用 `python3 -m autoperf.cli run ...`，不要使用 `python3 -m autoperf run ...`。
+## 快速开始
 
-核心功能只依赖 Python 标准库。`matplotlib` 是可选依赖，只用于生成 PNG 图片；没有安装时不影响主流程和 HTML 报告生成。
-
-## 完整压测
-
-默认使用项目内置 JMX 模板：
-
-```text
-templates/base.jmx
-```
-
-运行时会先把模板复制到本次结果目录，只修改复制后的 JMX 文件，不会修改原始模板。
-
-安装后可以直接使用 `autoperf run`：
+完整压测示例：
 
 ```bash
 autoperf run \
@@ -75,86 +55,44 @@ autoperf run \
   --ready-log-pattern "Booting worker"
 ```
 
-如果没有安装命令，也可以在项目根目录直接运行：
+默认使用内置 JMX 模板 `templates/base.jmx`。运行时会复制模板到本次结果目录，只修改副本，不修改原始模板。
+
+使用自定义 JMX：
 
 ```bash
-python3 -m autoperf.cli run \
-  --container ai-fs-serving \
-  --server-name fs \
-  --server-config /root/test/server_config.json \
-  --service-workers 4 \
-  --service-threads 8 \
-  --threads 50 \
-  --duration 600 \
-  --output /root/test/results \
-  --run-scripts /root/test/run_scripts \
-  --ready-log-pattern "Booting worker"
+autoperf run ... --jmx /path/to/custom.jmx
 ```
 
-如果需要使用自定义 JMX 模板，可以传入：
+## 执行流程
 
-```bash
---jmx /path/to/custom.jmx
-```
+`autoperf run` 会依次完成：
 
-## 服务启动检查
+1. 修改本地 `server_config.json` 中的 `workers` 和 `threads`
+2. `docker cp` 到容器内 `/hexapp/ai-<server_name>-serving/conf/server_config.json`
+3. 重启容器并等待服务启动
+4. 复制并修改 JMX 模板
+5. 启动监控脚本和 JMeter 压测
+6. 保存 JMeter、监控、日志和报告文件
 
-`--ready-log-pattern` 用于设置服务启动成功的日志关键字。
-
-容器重启后，CLI 会循环执行：
+`--ready-log-pattern` 用于指定服务启动成功的日志关键字。容器重启后，工具会轮询：
 
 ```bash
 docker logs --tail 200 <container>
 ```
 
-如果最近 200 行日志中出现 `--ready-log-pattern` 指定的文本，就认为服务已经启动完成，可以开始 JMeter 压测。
-
-例如：
-
-```bash
---ready-log-pattern "Booting worker"
-```
-
-表示只要容器日志里出现：
-
-```text
-Booting worker
-```
-
-就认为服务 ready。
-
-这个值不是固定的，需要根据你的服务真实启动日志来设置。例如：
-
-```bash
---ready-log-pattern "Application startup complete"
-```
-
-或者：
-
-```bash
---ready-log-pattern "Server started"
-```
-
-如果不传 `--ready-log-pattern`，工具只做基础检查：确认容器处于 running 状态，能获取容器 root PID 和子进程 PID，然后等待几秒进入压测。生产压测建议设置一个明确的启动成功日志关键字。
-
-## 完整流程
-
-```text
-修改 server_config.json
-docker cp 到 /hexapp/ai-<server_name>-serving/conf/server_config.json
-docker restart 容器
-等待服务启动成功
-重新获取容器主进程 PID 和子进程 PID
-复制 JMX 模板到结果目录
-修改 JMX 副本中的线程数和持续时间
-启动脚本监控
-启动 JMeter 压测
-保存 monitor.csv
-生成 monitor_report.html
-归档结果目录
-```
+如果最近 200 行日志中出现指定文本，就开始压测。未设置该参数时，只检查容器运行状态和进程 PID。
 
 ## 常用命令
+
+环境检查：
+
+```bash
+autoperf check \
+  --container ai-fs-serving \
+  --server-name fs \
+  --server-config /root/test/server_config.json \
+  --run-scripts scripts
+```
 
 只修改 JMX：
 
@@ -188,17 +126,7 @@ autoperf test-monitor \
   --monitor-timeout 60
 ```
 
-环境检查：
-
-```bash
-autoperf check \
-  --container ai-fs-serving \
-  --server-name fs \
-  --server-config /root/test/server_config.json \
-  --run-scripts scripts
-```
-
-兼容旧脚本中的写死容器名：
+兼容旧脚本中的固定容器名：
 
 ```bash
 autoperf update-scripts \
@@ -206,58 +134,35 @@ autoperf update-scripts \
   --run-scripts scripts
 ```
 
+基于已有 `result.jtl` 补生成 JMeter 聚合报告：
+
+```bash
+autoperf aggregate-jtl --jtl /path/to/result.jtl
+```
+
 ## 监控脚本
 
-每次采样时，CLI 会并发调用 4 个脚本，等待 4 个脚本都返回后写入同一行 `monitor.csv`：
+每次采样会并发调用 4 个脚本，并写入同一行 `monitor.csv`：
 
 | 脚本 | 指标 | CSV 字段 | 单位 |
 |---|---|---|---|
 | `run_cpu.sh` | CPU 使用率 | `cpu_usage` | `%` |
-| `run_mem.sh` | 内存占用 | `mem_usage` | GB，按 RSS KB / 1024 / 1024 换算 |
+| `run_mem.sh` | 内存占用 | `mem_usage` | GB |
 | `run_npu_usage.sh` | NPU AICore 使用率 | `npu_usage` | `%` |
-| `run_npu_mem.sh` | NPU 显存占用 | `npu_mem` | MB，取 `npu-smi` 进程显存输出值 |
+| `run_npu_mem.sh` | NPU 显存占用 | `npu_mem` | MiB |
 
-采样间隔通过 `--interval` 控制，默认 `0.1` 秒，支持小数秒：
-
-```bash
---interval 0.1
-```
-
-为了避免高频调用 `docker top` 和 `npu-smi` 造成额外压力，最小有效间隔是 `0.05` 秒。低于该值的配置会自动按 `0.05` 秒执行；例如 `--interval 0.003` 实际会按 50ms 采样。
-
-监控脚本单次执行超时时间通过 `--monitor-timeout` 控制，默认 `60` 秒。多 worker 场景下建议先用 `test-monitor` 验证监控耗时，再启动完整压测：
-
-```bash
-autoperf test-monitor \
-  --container ai-fs-serving \
-  --workers 15 \
-  --run-scripts scripts \
-  --monitor-timeout 60
-```
-
-当 `--service-workers` 较大时，建议把 `--interval` 调到 `2` 到 `5` 秒，避免监控采样频率过高影响被测服务。CLI 每轮采样会先统一发现 worker PID 和关联子进程 PID，再通过环境变量传给脚本；脚本直接手动运行时仍会走原来的自动发现逻辑。
-
-脚本调用格式：
-
-```bash
-./run_cpu.sh ai-fs-serving
-```
+采样间隔由 `--interval` 控制，默认 `0.1` 秒，最小有效值 `0.05` 秒。多 worker 场景建议使用 `2` 到 `5` 秒，避免监控本身影响被测服务。
 
 脚本要求：
 
-- 通过参数接收容器名。
-- 不写死容器名。
-- 不写死 PID。
-- CLI 调用时优先使用 `AUTOPERF_MONITOR_PIDS` 和 `AUTOPERF_MONITOR_RELATED_PIDS`，避免重复扫描。
-- 手动执行脚本且未传入上述环境变量时，脚本会自行重新获取容器 root PID 并递归查找子进程 PID。
-- 单进程场景直接取该进程指标。
-- 多进程场景取所有子进程中的最大值。
-- stdout 只输出一个数字。
-- 异常时输出 `0`。
+- 通过参数接收容器名，不写死容器名或 PID
+- stdout 只输出一个数字
+- 异常时输出 `0`
+- CLI 调用时优先读取 `AUTOPERF_MONITOR_PIDS` 和 `AUTOPERF_MONITOR_RELATED_PIDS`
 
-## server_config.json
+## 配置文件
 
-当前版本只修改 `workers` 和 `threads`：
+当前版本只修改 `server_config.json` 中的 `workers` 和 `threads`，其他字段保持不变：
 
 ```json
 {
@@ -270,29 +175,21 @@ autoperf test-monitor \
 }
 ```
 
-其他字段保持不变。
-
 容器内目标路径由 `--server-name` 决定：
 
 ```text
 /hexapp/ai-<server_name>-serving/conf/server_config.json
 ```
 
-例如：
-
-```text
---server-name fs
-```
-
-对应：
+例如 `--server-name fs` 对应：
 
 ```text
 /hexapp/ai-fs-serving/conf/server_config.json
 ```
 
-修改配置并 `docker cp` 后必须重启容器。容器重启后，旧的 root PID 和子进程 PID 全部失效，必须重新获取。
+配置推送后必须重启容器。容器重启后，旧的 root PID 和子进程 PID 会失效，工具会重新获取。
 
-## 结果目录
+## 输出结果
 
 每次压测生成独立目录：
 
@@ -300,7 +197,7 @@ autoperf test-monitor \
 <output>/<test_name>_<container>_<service_workers>w_<service_threads>t_<threads>jmx_<duration>s_<timestamp>/
 ```
 
-目录结构：
+主要文件：
 
 ```text
 result.jtl
@@ -309,6 +206,8 @@ run.log
 config.json
 <test_name>.modified.jmx
 modified_server_config.json
+jmeter_aggregate_report.html
+jmeter_aggregate_report.csv
 monitor/
   monitor.csv
   monitor_report.html
@@ -323,117 +222,15 @@ scripts/
   run_npu_mem.sh
 ```
 
-`monitor.csv` 字段：
-
-```text
-timestamp,cpu_usage,mem_usage,npu_usage,npu_mem
-```
-
-字段单位说明：
-
-| 字段 | 含义 | 单位 |
-|---|---|---|
-| `timestamp` | 采样时间 | 本地时间字符串 |
-| `cpu_usage` | 目标 worker 进程 CPU 使用率最大值 | `%` |
-| `mem_usage` | 目标 worker 进程 RSS 内存最大值 | GB，按 1024 换算 |
-| `npu_usage` | 目标 NPU chip 的 AICore 使用率最大值 | `%` |
-| `npu_mem` | 目标 NPU 进程显存占用最大值 | MiB，沿用 `npu-smi` 输出 |
-
-`monitor_report.html` 是必须产物，包含 4 个离线图表：
-
-- CPU 使用率曲线
-- 内存占用曲线
-- NPU 使用率曲线
-- NPU 显存占用曲线
-
-如果安装了 `matplotlib`，会额外生成 PNG 图片。PNG 生成失败不会影响压测结果。
+`monitor_report.html` 为必产物，包含 CPU、内存、NPU 使用率和 NPU 显存曲线。安装 `matplotlib` 后会额外生成 PNG，PNG 生成失败不影响压测结果。
 
 ## 错误处理
 
-以下关键步骤失败会直接终止压测：
+以下关键步骤失败会终止压测：
 
-- `server_config.json` 不存在或 JSON 非法
-- 缺少 `workers` 或 `threads`
-- Docker 不可用
-- 容器不存在或未运行
-- 容器内配置目录不存在
-- `docker cp` 失败
-- `docker restart` 失败
-- 服务启动检查超时
-- JMX 模板不存在或 XML 解析失败
-- JMeter 不存在
+- `server_config.json` 不存在、JSON 非法或缺少 `workers` / `threads`
+- Docker、容器、容器内配置目录不可用
+- `docker cp`、`docker restart` 或服务启动检查失败
+- JMX 模板不存在、XML 解析失败或 JMeter 不存在
 
-监控脚本单次失败不会终止压测，该指标会写入 `0` 并记录 warning。
-
-## JMeter 聚合报告
-
-完整 `run` 流程会保留原始 JMeter 结果文件：
-
-```text
-result.jtl
-```
-
-并自动生成：
-
-```text
-jmeter_aggregate_report.html
-jmeter_aggregate_report.csv
-```
-
-聚合报告包含：
-
-- 事务名
-- 事务数
-- 平均响应时间
-- 90% 百分位响应时间
-- 最小响应时间
-- 最大响应时间
-- 异常率
-- 吞吐量
-
-如果已经跑出一版结果，可以基于现有 `result.jtl` 临时补生成聚合报告：
-
-```bash
-autoperf aggregate-jtl --jtl /path/to/result.jtl
-```
-
-默认会在 `result.jtl` 同目录生成 `jmeter_aggregate_report.html` 和 `jmeter_aggregate_report.csv`。也可以显式指定输出路径：
-
-```bash
-autoperf aggregate-jtl \
-  --jtl /path/to/result.jtl \
-  --html /path/to/jmeter_aggregate_report.html \
-  --csv /path/to/jmeter_aggregate_report.csv
-```
-
-## Word 性能测试报告
-
-完成所有场景压测后，可以把同一个结果根目录下的 AutoPerf run 目录汇总到 Word 报告模板中：
-
-```bash
-autoperf export-docx \
-  --results /path/to/results \
-  --template /path/to/template.docx \
-  --output /path/to/performance-report.docx
-```
-
-`--results` 下应包含 `autoperf run` 生成的独立结果目录，每个目录至少包含：
-
-```text
-config.json
-jmeter_aggregate_report.csv
-monitor/
-  monitor.csv
-```
-
-命令会读取 JMeter 聚合指标、CPU/内存/NPU/显存峰值，并生成新的 docx 文件，不会覆盖模板文件。模板中如果包含以下占位段落，会在对应位置替换为自动汇总表：
-
-```text
-{{AUTOPERF_BASELINE_TABLE}}
-{{AUTOPERF_SINGLE_TABLE}}
-{{AUTOPERF_MULTI_TABLE}}
-{{AUTOPERF_STABILITY_TABLE}}
-{{AUTOPERF_RESOURCE_SUMMARY}}
-```
-
-如果模板没有这些占位段落，工具会在正文末尾追加 `AutoPerf 自动汇总结果` 章节。
+监控脚本单次失败不会终止压测，对应指标写入 `0` 并记录 warning。

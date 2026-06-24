@@ -19,7 +19,6 @@ from .docker_utils import (
     wait_container_running,
     wait_service_ready,
 )
-from .docx_exporter import export_docx_report
 from .env_checker import run_check
 from .jmeter_aggregate import generate_jmeter_aggregate_report
 from .jmeter_runner import run_jmeter
@@ -125,11 +124,6 @@ def build_parser() -> argparse.ArgumentParser:
     aggregate_jtl.add_argument("--csv", help="output CSV path, defaults to jmeter_aggregate_report.csv next to JTL")
     aggregate_jtl.set_defaults(func=cmd_aggregate_jtl)
 
-    export_docx = sub.add_parser("export-docx", help="generate a DOCX performance report from completed results")
-    export_docx.add_argument("--results", required=True, help="root directory containing AutoPerf run result directories")
-    export_docx.add_argument("--template", required=True, help="source DOCX report template")
-    export_docx.add_argument("--output", required=True, help="output DOCX report path")
-    export_docx.set_defaults(func=cmd_export_docx)
     return parser
 
 
@@ -328,17 +322,6 @@ def cmd_aggregate_jtl(args) -> int:
     generate_jmeter_aggregate_report(jtl_file, html_file, csv_file)
     ok(logger, f"JMeter aggregate report generated: {html_file}")
     ok(logger, f"JMeter aggregate CSV generated: {csv_file}")
-    return 0
-
-
-def cmd_export_docx(args) -> int:
-    logger = setup_logger()
-    output = export_docx_report(
-        Path(args.results).resolve(),
-        Path(args.template).resolve(),
-        Path(args.output).resolve(),
-    )
-    ok(logger, f"DOCX report generated: {output}")
     return 0
 
 
