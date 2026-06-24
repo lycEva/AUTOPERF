@@ -13,7 +13,6 @@
 - 监控方式：自定义 shell 脚本
 - Python：3.8+
 
-ARM64 + Ascend 310P 环境下，JMeter PerfMon / ServerAgent 插件经常不可用或兼容性较差，因此本项目不依赖 JMeter 自带监控插件。
 
 ## 安装
 
