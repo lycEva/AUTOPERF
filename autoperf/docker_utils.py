@@ -72,25 +72,21 @@ def get_child_pids(root_pid: int) -> list[int]:
     return found
 
 
-def container_config_dir(server_name: str) -> str:
-    return f"/hexapp/ai-{server_name}-serving/conf"
+def container_config_path(config_dir: str) -> str:
+    return config_dir.rstrip("/") + "/server_config.json"
 
 
-def container_config_path(server_name: str) -> str:
-    return f"{container_config_dir(server_name)}/server_config.json"
-
-
-def require_container_config_dir(container: str, server_name: str) -> None:
-    path = container_config_dir(server_name)
-    result = run_command(["docker", "exec", container, "test", "-d", path], timeout=15, check=False)
+def require_container_config_dir(container: str, config_dir: str) -> None:
+    result = run_command(["docker", "exec", container, "test", "-d", config_dir], timeout=15, check=False)
     if result.returncode != 0:
-        raise AutoPerfError(f"container config dir not found: {container}:{path}")
+        raise AutoPerfError(f"container config dir not found: {container}:{config_dir}")
 
 
-def docker_cp_server_config(container: str, server_name: str, src: Path, logger: logging.Logger) -> None:
-    dst = f"{container}:{container_config_path(server_name)}"
+def docker_cp_server_config(container: str, config_dir: str, src: Path, logger: logging.Logger) -> None:
+    dst = f"{container}:{container_config_path(config_dir)}"
     run_command(["docker", "cp", str(src), dst], timeout=60)
     ok(logger, f"docker cp completed: {src.name} -> {dst}")
+
 
 
 def restart_container(container: str, logger: logging.Logger) -> None:

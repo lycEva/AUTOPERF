@@ -1,0 +1,21 @@
+{
+  "product_name": "财报识别引擎",
+  "version": "ai-fs-serving-2.8.31-TensorRT",
+  "test_purpose": "验证系统在设定压力场景下的接口性能、资源使用情况和运行稳定性。",
+  "scenario": "单交易并发",
+  "hardware": [
+    {
+      "name": "OCR 识别服务器",
+      "quantity": "1 台",
+      "configuration": "CPU型号：Intel(R) Xeon(R) Silver 4310 CPU @ 2.10GHz;CPU个数：4;CPU核数：4;内存：62G;显卡:NVIDIA A40"
+    }
+  ],
+  "participants": [
+    {
+      "role": "参与人员",
+      "name": "刘雨晨",
+      "responsibility": "性能测试与结果分析"
+    }
+  ],
+  "conclusion": "请结合项目性能门槛、业务容量目标和本次自动采集指标填写最终结论。"
+}

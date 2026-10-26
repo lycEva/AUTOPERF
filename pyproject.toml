@@ -16,6 +16,8 @@ png = ["matplotlib>=3.5"]
 
 [project.scripts]
 autoperf = "autoperf.cli:main"
+autoperf-report = "autoperf.report_cli:main"
+autoperf-batch-report = "autoperf.batch_report_cli:main"
 
 [tool.setuptools]
 packages = ["autoperf"]
