@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import traceback
 from pathlib import Path
 
 from . import __version__
-from .config import DEFAULT_JMX_TEMPLATE, DEFAULT_SCRIPTS_DIR, build_run_config
+from .config import DEFAULT_CONTAINER_CONFIG_DIR, DEFAULT_JMX_TEMPLATE, DEFAULT_SCRIPTS_DIR, build_existing_run_config, build_run_config
 from .docker_utils import (
     check_docker_available,
     docker_cp_server_config,
@@ -27,6 +28,7 @@ from .logger import error, info, ok, setup_logger, warn
 from .monitor import (
     DEFAULT_MONITOR_TIMEOUT_SECONDS,
     MIN_MONITOR_INTERVAL_SECONDS,
+    MonitorGroup,
     MonitorLoop,
     SCRIPT_NAMES,
     run_monitor_once,
@@ -60,6 +62,50 @@ def _interval_arg(name: str):
     return parse
 
 
+def _monitor_target(value: str) -> tuple[str, int]:
+    name, separator, workers = value.rpartition(":")
+    if not separator or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", name):
+        raise argparse.ArgumentTypeError("expected CONTAINER:WORKERS (Docker container name and positive worker count)")
+    return name, _positive_arg("--monitor-container workers")(workers)
+
+
+def _add_monitor_targets(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--monitor-container", action="append", type=_monitor_target, default=[],
+        metavar="CONTAINER:WORKERS",
+        help="additional container to monitor; repeat for multiple dependencies",
+    )
+
+
+def _validate_monitor_targets(container: str, targets: list[tuple[str, int]]) -> None:
+    seen = {container}
+    for name, _ in targets:
+        if name in seen:
+            raise AutoPerfError(f"duplicate monitor container: {name}")
+        seen.add(name)
+        require_container_exists(name)
+        require_container_running(name)
+
+
+def _build_monitor_group(cfg, logger) -> MonitorGroup:
+    targets = [(cfg.container, getattr(cfg, "service_workers", getattr(cfg, "workers", 1)), cfg.monitor_csv)]
+    targets.extend(
+        (name, workers, cfg.monitor_csv.parent / "containers" / name / "monitor.csv")
+        for name, workers in cfg.monitor_containers
+    )
+    return MonitorGroup([
+        MonitorLoop(cfg.run_scripts, name, workers, "", csv_file, cfg.interval, logger, timeout=cfg.monitor_timeout)
+        for name, workers, csv_file in targets
+    ])
+
+
+def _generate_monitor_reports(cfg, logger) -> None:
+    _generate_reports_safely(cfg.monitor_csv, cfg.monitor_report, logger)
+    for name, _ in cfg.monitor_containers:
+        directory = cfg.monitor_csv.parent / "containers" / name
+        _generate_reports_safely(directory / "monitor.csv", directory / "monitor_report.html", logger)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="autoperf", description="AutoPerf CLI for Docker + JMeter + Ascend monitoring")
     parser.add_argument("--version", action="version", version=f"autoperf {__version__}")
@@ -68,6 +114,10 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="run full performance test")
     _add_common_run_args(run, include_service=True, include_jmeter=True)
     run.set_defaults(func=cmd_run)
+
+    run_existing = sub.add_parser("run-existing", help="run JMeter and monitoring against an existing service")
+    _add_existing_run_args(run_existing)
+    run_existing.set_defaults(func=cmd_run_existing)
 
     update_jmx_parser = sub.add_parser("update-jmx", help="copy and update a JMX template")
     update_jmx_parser.add_argument("--jmx", required=True, help="source JMX template")
@@ -86,12 +136,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MONITOR_TIMEOUT_SECONDS,
         type=_positive_arg("--monitor-timeout"),
     )
+    _add_monitor_targets(test_monitor)
     test_monitor.set_defaults(func=cmd_test_monitor)
 
     check = sub.add_parser("check", help="check environment")
     check.add_argument("--container", required=True)
     check.add_argument("--server-name", required=True)
     check.add_argument("--server-config", required=True)
+    check.add_argument("--container-config-dir", "-container-config-dir", default=DEFAULT_CONTAINER_CONFIG_DIR, help="container config directory (default: %(default)s)")
     check.add_argument("--jmx", help="JMX template path, defaults to templates/base.jmx")
     check.add_argument("--run-scripts", default=str(DEFAULT_SCRIPTS_DIR))
     check.add_argument("--jmeter-bin", default="jmeter")
@@ -104,6 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
     update_server.add_argument("--container", required=True)
     update_server.add_argument("--server-name", required=True)
     update_server.add_argument("--server-config", required=True)
+    update_server.add_argument("--container-config-dir", "-container-config-dir", default=DEFAULT_CONTAINER_CONFIG_DIR, help="container config directory (default: %(default)s)")
     update_server.add_argument("--service-workers", required=True, type=_positive_arg("--service-workers"))
     update_server.add_argument("--service-threads", required=True, type=_positive_arg("--service-threads"))
     update_server.add_argument("--output", default=".")
@@ -128,10 +181,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _add_common_run_args(parser: argparse.ArgumentParser, *, include_service: bool, include_jmeter: bool) -> None:
+    _add_monitor_targets(parser)
     parser.add_argument("--jmx", help="JMX template path, defaults to templates/base.jmx")
     parser.add_argument("--container", required=True)
     parser.add_argument("--server-name", required=True)
     parser.add_argument("--server-config", required=True)
+    parser.add_argument("--container-config-dir", "-container-config-dir", default=DEFAULT_CONTAINER_CONFIG_DIR, help="container config directory (default: %(default)s)")
     if include_service:
         parser.add_argument("--service-workers", required=True, type=_positive_arg("--service-workers"))
         parser.add_argument("--service-threads", required=True, type=_positive_arg("--service-threads"))
@@ -155,6 +210,27 @@ def _add_common_run_args(parser: argparse.ArgumentParser, *, include_service: bo
     parser.add_argument("--ready-check-interval", default=3, type=_positive_arg("--ready-check-interval"))
 
 
+def _add_existing_run_args(parser: argparse.ArgumentParser) -> None:
+    _add_monitor_targets(parser)
+    parser.add_argument("--jmx", help="JMX template path, defaults to templates/base.jmx")
+    parser.add_argument("--container", required=True)
+    parser.add_argument("--workers", required=True, type=_positive_arg("--workers"))
+    parser.add_argument("--threads", required=True, type=_positive_arg("--threads"))
+    parser.add_argument("--duration", required=True, type=_positive_arg("--duration"))
+    parser.add_argument("--jmeter-bin", default="jmeter")
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--run-scripts", default=str(DEFAULT_SCRIPTS_DIR))
+    parser.add_argument("--interval", default=0.1, type=_interval_arg("--interval"))
+    parser.add_argument(
+        "--monitor-timeout",
+        default=DEFAULT_MONITOR_TIMEOUT_SECONDS,
+        type=_positive_arg("--monitor-timeout"),
+    )
+    parser.add_argument("--npu-smi")
+    parser.add_argument("--test-name")
+    parser.add_argument("--force", action="store_true")
+
+
 def cmd_run(args) -> int:
     cfg = build_run_config(args)
     if cfg.output_dir.exists() and not cfg.force:
@@ -171,7 +247,8 @@ def cmd_run(args) -> int:
         ok(logger, "Docker available")
         require_container_exists(cfg.container)
         require_container_running(cfg.container)
-        require_container_config_dir(cfg.container, cfg.server_name)
+        _validate_monitor_targets(cfg.container, cfg.monitor_containers)
+        require_container_config_dir(cfg.container, cfg.container_config_dir)
 
         info(logger, "Updating service config")
         update_server_config(
@@ -181,7 +258,7 @@ def cmd_run(args) -> int:
             threads=cfg.service_threads,
         )
         ok(logger, "modified_server_config.json generated")
-        docker_cp_server_config(cfg.container, cfg.server_name, cfg.modified_server_config, logger)
+        docker_cp_server_config(cfg.container, cfg.container_config_dir, cfg.modified_server_config, logger)
         restart_container(cfg.container, logger)
         config_data["container_restarted"] = True
         wait_container_running(cfg.container, cfg.restart_timeout)
@@ -201,16 +278,7 @@ def cmd_run(args) -> int:
         _write_config(cfg.output_dir / "config.json", config_data)
 
         info(logger, "Starting monitor loop")
-        monitor = MonitorLoop(
-            cfg.run_scripts,
-            cfg.container,
-            cfg.service_workers,
-            "",
-            cfg.monitor_csv,
-            cfg.interval,
-            logger,
-            timeout=cfg.monitor_timeout,
-        )
+        monitor = _build_monitor_group(cfg, logger)
         monitor.start()
         code = run_jmeter(
             jmeter_bin=cfg.jmeter_bin,
@@ -232,7 +300,63 @@ def cmd_run(args) -> int:
         if monitor is not None:
             monitor.stop()
         _write_config(cfg.output_dir / "config.json", config_data)
-        _generate_reports_safely(cfg.monitor_csv, cfg.monitor_report, logger if "logger" in locals() else None)
+        _generate_monitor_reports(cfg, logger)
+        _generate_jmeter_aggregate_safely(
+            cfg.jmeter_result_jtl,
+            cfg.jmeter_aggregate_report,
+            cfg.jmeter_aggregate_csv,
+            logger if "logger" in locals() else None,
+        )
+
+
+def cmd_run_existing(args) -> int:
+    cfg = build_existing_run_config(args)
+    if cfg.output_dir.exists() and not cfg.force:
+        raise AutoPerfError(f"output directory already exists: {cfg.output_dir}")
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    logger = setup_logger(cfg.output_dir / "run.log")
+    monitor = None
+    config_data = cfg.to_json_dict()
+    try:
+        info(logger, "AutoPerf existing-service run started")
+        ensure_file(cfg.jmx_template, "JMX template")
+        validate_monitor_scripts(cfg.run_scripts)
+        check_docker_available()
+        ok(logger, "Docker available")
+        require_container_exists(cfg.container)
+        require_container_running(cfg.container)
+        _validate_monitor_targets(cfg.container, cfg.monitor_containers)
+
+        info(logger, "Updating JMX")
+        prepare_modified_jmx(cfg.jmx_template, cfg.modified_jmx, threads=cfg.threads, duration=cfg.duration)
+        ok(logger, "Modified JMX generated")
+        _copy_scripts_snapshot(cfg.run_scripts, cfg.output_dir / "scripts")
+        _write_config(cfg.output_dir / "config.json", config_data)
+
+        info(logger, "Starting monitor loop")
+        monitor = _build_monitor_group(cfg, logger)
+        monitor.start()
+        code = run_jmeter(
+            jmeter_bin=cfg.jmeter_bin,
+            jmx=cfg.modified_jmx,
+            result_jtl=cfg.jmeter_result_jtl,
+            jmeter_log=cfg.output_dir / "jmeter.log",
+            logger=logger,
+        )
+        if code != 0:
+            error(logger, f"JMeter failed: exit code {code}")
+        else:
+            ok(logger, "JMeter completed")
+        return 0 if code == 0 else code
+    except Exception as exc:
+        error(logger, str(exc))
+        logger.debug(traceback.format_exc())
+        raise
+    finally:
+        if monitor is not None:
+            monitor.stop()
+        _write_config(cfg.output_dir / "config.json", config_data)
+        _generate_monitor_reports(cfg, logger)
         _generate_jmeter_aggregate_safely(
             cfg.jmeter_result_jtl,
             cfg.jmeter_aggregate_report,
@@ -257,6 +381,7 @@ def cmd_test_monitor(args) -> int:
         workers = int(load_server_config(Path(args.server_config).resolve())["workers"])
     if workers is None:
         workers = 1
+    _validate_monitor_targets(args.container, args.monitor_container)
     values = run_monitor_once(
         Path(args.run_scripts).resolve(),
         args.container,
@@ -264,7 +389,10 @@ def cmd_test_monitor(args) -> int:
         logger,
         timeout=args.monitor_timeout,
     )
-    ok(logger, f"Monitor test passed: {values}")
+    ok(logger, f"Monitor test passed: {args.container}: {values}")
+    for name, target_workers in args.monitor_container:
+        target_values = run_monitor_once(Path(args.run_scripts).resolve(), name, target_workers, logger, timeout=args.monitor_timeout)
+        ok(logger, f"Monitor test passed: {name}: {target_values}")
     return 0
 
 
@@ -288,8 +416,8 @@ def cmd_update_server_config(args) -> int:
     check_docker_available()
     require_container_exists(args.container)
     require_container_running(args.container)
-    require_container_config_dir(args.container, args.server_name)
-    docker_cp_server_config(args.container, args.server_name, modified, logger)
+    require_container_config_dir(args.container, args.container_config_dir)
+    docker_cp_server_config(args.container, args.container_config_dir, modified, logger)
     if args.restart:
         restart_container(args.container, logger)
         wait_container_running(args.container, args.restart_timeout)

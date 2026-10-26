@@ -213,12 +213,12 @@ def _run_script(
         )
     except Exception as exc:
         elapsed = time.monotonic() - started
-        _warn_throttled(logger, path.name, f"Monitor script failed: {path.name}: {exc} (elapsed {elapsed:.2f}s)")
+        _warn_throttled(logger, f"{container}:{path.name}", f"Monitor script failed: {container}:{path.name}: {exc} (elapsed {elapsed:.2f}s)")
         return 0.0
     elapsed = time.monotonic() - started
     logger.debug("Monitor script completed: %s elapsed %.2fs", path.name, elapsed)
     if result.returncode != 0:
-        _warn_throttled(logger, path.name, f"Monitor script failed: {path.name}: {result.stderr.strip()}")
+        _warn_throttled(logger, f"{container}:{path.name}", f"Monitor script failed: {container}:{path.name}: {result.stderr.strip()}")
         return 0.0
     output = result.stdout.strip()
     try:
@@ -290,7 +290,7 @@ class MonitorLoop:
     def stop(self) -> None:
         self._stop.set()
         if self._thread is not None:
-            self._thread.join(timeout=max(5, self.interval + 2))
+            self._thread.join()
 
     def _run(self) -> None:
         with self.csv_file.open("w", encoding="utf-8", newline="") as fp:
@@ -316,6 +316,27 @@ class MonitorLoop:
                 )
                 fp.flush()
                 self._stop.wait(self.interval)
+
+
+class MonitorGroup:
+    """Run independent container samplers during the same load test."""
+
+    def __init__(self, monitors: list[MonitorLoop]):
+        self.monitors = monitors
+
+    def start(self) -> None:
+        try:
+            for monitor in self.monitors:
+                monitor.start()
+        except Exception:
+            self.stop()
+            raise
+
+    def stop(self) -> None:
+        for monitor in self.monitors:
+            monitor._stop.set()
+        for monitor in self.monitors:
+            monitor.stop()
 
 
 def run_monitor_once(
