@@ -179,7 +179,7 @@ extract_usage() {
   '
 }
 
-max="0"
+total="0"
 while read -r card chip_count; do
   [ -z "$card" ] && continue
   snapshot="$(npu-smi info -t proc-mem -i "$card" 2>/dev/null || true)"
@@ -245,12 +245,12 @@ while read -r card chip_count; do
     fi
     log "card=$card chip=$chip npu_usage_value=${value:-<empty>}"
     if [ -n "$value" ]; then
-      max="$(awk -v a="$max" -v b="$value" 'BEGIN { print (b > a ? b : a) }')"
+      total="$(awk -v a="$total" -v b="$value" 'BEGIN { print a + b }')"
     fi
   done
 done <<EOF
 $card_rows
 EOF
 
-log "final_npu_usage=$max"
-printf "%.2f\n" "$max"
+log "final_npu_usage=$total"
+printf "%.2f\n" "$total"

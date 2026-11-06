@@ -6,7 +6,7 @@ workers="${2:-1}"
 proc_root="${CPU_PROC_ROOT:-/proc}"
 sample_seconds="${CPU_SAMPLE_SECONDS:-1}"
 
-if [ -z "$container" ]; then echo 0; exit 0; fi
+if [ -z "$container" ] || ! command -v npu-smi >/dev/null 2>&1; then echo 0; exit 0; fi
 
 worker_pids="$(printf '%s\n' "${AUTOPERF_MONITOR_PIDS:-}" | tr ',' '\n' | awk 'NF {print $1}')"
 
@@ -20,6 +20,11 @@ worker_pids="$(docker top "$container" 2>/dev/null | awk -v limit="$workers" '
   }
 ' | sort -k2 -nr | head -n "$workers" | awk '{print $1}')"
 fi
+
+container_pids="${AUTOPERF_MONITOR_RELATED_PIDS:-$worker_pids}"
+npu_pids="$(npu-smi info 2>/dev/null | awk '/\\|/ { n=split($0, cols, /\\|/); if (n >= 4) { pid=cols[3]; gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", pid); if (pid ~ /^[0-9]+$/) print pid } }' | sort -n | uniq)"
+worker_pids="$(comm -12 <(printf '%s\\n' \"$container_pids\" | tr ',' '\\n' | awk 'NF {print $1}' | sort -n -u) <(printf '%s\\n' \"$npu_pids\" | sort -n -u))"
+if [ -z "$worker_pids" ]; then echo 0; exit 0; fi
 
 if [ -z "$worker_pids" ]; then
   root_pid="$(docker inspect -f '{{.State.Pid}}' "$container" 2>/dev/null || true)"
@@ -90,14 +95,15 @@ max_cpu="$(awk '
       printf "%.2f\n", 0
       exit
     }
+    total_cpu = 0
     for (pid in pid2) {
       if (!(pid in pid1)) continue
       pid_delta = pid2[pid] - pid1[pid]
       if (pid_delta < 0) continue
       value = (pid_delta / per_cpu_delta) * 100
-      if (value > max) max = value
+      total_cpu += value
     }
-    printf "%.2f\n", max + 0
+    printf "%.2f\n", total_cpu + 0
   }
 ' <<EOF
 $first_sample
