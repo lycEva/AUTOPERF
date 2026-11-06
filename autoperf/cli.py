@@ -142,8 +142,12 @@ def build_parser() -> argparse.ArgumentParser:
     check = sub.add_parser("check", help="check environment")
     check.add_argument("--container", required=True)
     check.add_argument("--server-name", required=True)
+<<<<<<< HEAD
     check.add_argument("--server-config", required=True)
     check.add_argument("--container-config-dir", "-container-config-dir", default=DEFAULT_CONTAINER_CONFIG_DIR, help="container config directory (default: %(default)s)")
+=======
+    check.add_argument("--server-config", required=True, help="host server_config.json path")
+>>>>>>> 3d302bf (更新监控脚本)
     check.add_argument("--jmx", help="JMX template path, defaults to templates/base.jmx")
     check.add_argument("--run-scripts", default=str(DEFAULT_SCRIPTS_DIR))
     check.add_argument("--jmeter-bin", default="jmeter")
@@ -155,8 +159,12 @@ def build_parser() -> argparse.ArgumentParser:
     update_server = sub.add_parser("update-server-config", help="update server_config.json and docker cp it")
     update_server.add_argument("--container", required=True)
     update_server.add_argument("--server-name", required=True)
+<<<<<<< HEAD
     update_server.add_argument("--server-config", required=True)
     update_server.add_argument("--container-config-dir", "-container-config-dir", default=DEFAULT_CONTAINER_CONFIG_DIR, help="container config directory (default: %(default)s)")
+=======
+    update_server.add_argument("--server-config", required=True, help="host server_config.json path")
+>>>>>>> 3d302bf (更新监控脚本)
     update_server.add_argument("--service-workers", required=True, type=_positive_arg("--service-workers"))
     update_server.add_argument("--service-threads", required=True, type=_positive_arg("--service-threads"))
     update_server.add_argument("--output", default=".")
@@ -185,8 +193,12 @@ def _add_common_run_args(parser: argparse.ArgumentParser, *, include_service: bo
     parser.add_argument("--jmx", help="JMX template path, defaults to templates/base.jmx")
     parser.add_argument("--container", required=True)
     parser.add_argument("--server-name", required=True)
+<<<<<<< HEAD
     parser.add_argument("--server-config", required=True)
     parser.add_argument("--container-config-dir", "-container-config-dir", default=DEFAULT_CONTAINER_CONFIG_DIR, help="container config directory (default: %(default)s)")
+=======
+    parser.add_argument("--server-config", required=True, help="host server_config.json path")
+>>>>>>> 3d302bf (更新监控脚本)
     if include_service:
         parser.add_argument("--service-workers", required=True, type=_positive_arg("--service-workers"))
         parser.add_argument("--service-threads", required=True, type=_positive_arg("--service-threads"))

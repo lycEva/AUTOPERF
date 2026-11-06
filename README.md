@@ -328,6 +328,7 @@ AI 配置参数如下：
 }
 ```
 
+<<<<<<< HEAD
 容器内配置目录默认为 `/hexapp/conf`，目标文件为 `/hexapp/conf/server_config.json`。
 `run`、`check` 和 `update-server-config` 均支持 `--container-config-dir`（也支持 `-container-config-dir`）。
 旧目录结构可显式指定，例如：
@@ -337,6 +338,11 @@ AI 配置参数如下：
 ```
 
 `--server-name` 不再决定容器内配置路径；`--server-config` 仍指定宿主机上的配置文件。
+=======
+`--server-config` 必须指定宿主机上的配置文件路径。容器内目标路径默认为
+`/hexapp/ai-<server-name>-serving/conf/server_config.json`，例如 `--server-name fs`
+时为 `/hexapp/ai-fs-serving/conf/server_config.json`。
+>>>>>>> 3d302bf (更新监控脚本)
 
 配置推送后必须重启容器。容器重启后，旧的 root PID 和子进程 PID 会失效，工具会重新获取。
 

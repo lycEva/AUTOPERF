@@ -147,7 +147,7 @@ fi
 log "cards=$(printf '%s' "$cards" | tr '\n' ',' | sed 's/,$//')"
 if [ -z "$cards" ]; then echo 0; exit 0; fi
 
-max="0"
+total="0"
 for card in $cards; do
   snapshot="$(npu-smi info -t proc-mem -i "$card" 2>/dev/null || true)"
   log "card=$card snapshot_lines=$(printf '%s\n' "$snapshot" | wc -l | awk '{print $1}')"
@@ -177,10 +177,10 @@ for card in $cards; do
     ' | tail -n 1)"
     log "card=$card pid=$pid npu_mem_value=${value:-<empty>}"
     if [ -n "$value" ]; then
-      max="$(awk -v a="$max" -v b="$value" 'BEGIN { print (b > a ? b : a) }')"
+      total="$(awk -v a="$total" -v b="$value" 'BEGIN { print a + b }')"
     fi
   done
 done
 
-log "final_npu_mem=$max"
-printf "%.2f\n" "$max"
+log "final_npu_mem=$total"
+printf "%.2f\n" "$total"
