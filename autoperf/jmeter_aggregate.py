@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import html
+import json
 import math
 import statistics
 from pathlib import Path
@@ -85,6 +86,17 @@ def _summarize(label: str, samples: list[dict]) -> dict:
 
 def aggregate_jtl(jtl_file: Path) -> list[dict]:
     samples = _read_jtl_csv(jtl_file)
+    config_file = jtl_file.with_name("config.json")
+    if config_file.is_file():
+        config = json.loads(config_file.read_text(encoding="utf-8"))
+        if config.get("warmup", 0):
+            start = config.get("measurement_start_ms")
+            end = config.get("measurement_end_ms")
+            if start is None or end is None:
+                raise AutoPerfError("warmup run has no measurement window in config.json; cannot aggregate safely")
+            samples = [sample for sample in samples if start <= sample["timestamp"] < end]
+            if not samples:
+                raise AutoPerfError("JTL has no samples in the measurement window")
     by_label: dict[str, list[dict]] = {}
     for sample in samples:
         by_label.setdefault(sample["label"], []).append(sample)

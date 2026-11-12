@@ -63,6 +63,16 @@ def _interval_arg(name: str):
     return parse
 
 
+def _warmup_arg(value: str) -> int:
+    try:
+        seconds = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--warmup must be a non-negative integer") from exc
+    if seconds < 0:
+        raise argparse.ArgumentTypeError("--warmup must be a non-negative integer")
+    return seconds
+
+
 def _monitor_target(value: str) -> tuple[str, int]:
     name, separator, workers = value.rpartition(":")
     if not separator or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", name):
@@ -204,7 +214,7 @@ def _add_common_run_args(parser: argparse.ArgumentParser, *, include_service: bo
     if include_jmeter:
         parser.add_argument("--threads", required=True, type=_positive_arg("--threads"))
         parser.add_argument("--duration", required=True, type=_positive_arg("--duration"))
-        parser.add_argument("--warmup", default=0, type=int, choices=range(0, 2147483648), metavar="SECONDS", help="warmup duration before measured duration")
+        parser.add_argument("--warmup", default=0, type=_warmup_arg, metavar="SECONDS", help="warmup duration before measured duration")
         parser.add_argument("--jmeter-bin", default="jmeter")
     parser.add_argument("--output", required=True)
     parser.add_argument("--run-scripts", default=str(DEFAULT_SCRIPTS_DIR))
@@ -230,7 +240,7 @@ def _add_existing_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--workers", required=True, type=_positive_arg("--workers"))
     parser.add_argument("--threads", required=True, type=_positive_arg("--threads"))
     parser.add_argument("--duration", required=True, type=_positive_arg("--duration"))
-    parser.add_argument("--warmup", default=0, type=int, choices=range(0, 2147483648), metavar="SECONDS", help="warmup duration before measured duration")
+    parser.add_argument("--warmup", default=0, type=_warmup_arg, metavar="SECONDS", help="warmup duration before measured duration")
     parser.add_argument("--jmeter-bin", default="jmeter")
     parser.add_argument("--output", required=True)
     parser.add_argument("--run-scripts", default=str(DEFAULT_SCRIPTS_DIR))
@@ -243,6 +253,33 @@ def _add_existing_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--npu-smi")
     parser.add_argument("--test-name")
     parser.add_argument("--force", action="store_true")
+
+
+def _run_load(cfg, monitor, config_data, logger) -> int:
+    def start_measurement(test_start_ms: int) -> None:
+        start = test_start_ms + cfg.warmup * 1000
+        end = start + cfg.duration * 1000
+        config_data.update(measurement_start_ms=start, measurement_end_ms=end)
+        _write_config(cfg.output_dir / "config.json", config_data)
+        info(logger, f"Warmup: {cfg.warmup}s; measurement: {cfg.duration}s")
+        for item in monitor.monitors:
+            item.measurement_start_ms = start
+            item.measurement_end_ms = end
+        monitor.start()
+
+    options = {}
+    if cfg.warmup:
+        options["on_test_start"] = start_measurement
+    else:
+        monitor.start()
+    return run_jmeter(
+        jmeter_bin=cfg.jmeter_bin,
+        jmx=cfg.modified_jmx,
+        result_jtl=cfg.jmeter_result_jtl,
+        jmeter_log=cfg.output_dir / "jmeter.log",
+        logger=logger,
+        **options,
+    )
 
 
 def cmd_run(args) -> int:
@@ -295,16 +332,7 @@ def cmd_run(args) -> int:
 
         info(logger, "Starting monitor loop")
         monitor = _build_monitor_group(cfg, logger)
-        for item in monitor.monitors:
-            item.warmup = cfg.warmup
-        monitor.start()
-        code = run_jmeter(
-            jmeter_bin=cfg.jmeter_bin,
-            jmx=cfg.modified_jmx,
-            result_jtl=cfg.jmeter_result_jtl,
-            jmeter_log=cfg.output_dir / "jmeter.log",
-            logger=logger,
-        )
+        code = _run_load(cfg, monitor, config_data, logger)
         if code != 0:
             error(logger, f"JMeter failed: exit code {code}")
         else:
@@ -355,16 +383,7 @@ def cmd_run_existing(args) -> int:
 
         info(logger, "Starting monitor loop")
         monitor = _build_monitor_group(cfg, logger)
-        for item in monitor.monitors:
-            item.warmup = cfg.warmup
-        monitor.start()
-        code = run_jmeter(
-            jmeter_bin=cfg.jmeter_bin,
-            jmx=cfg.modified_jmx,
-            result_jtl=cfg.jmeter_result_jtl,
-            jmeter_log=cfg.output_dir / "jmeter.log",
-            logger=logger,
-        )
+        code = _run_load(cfg, monitor, config_data, logger)
         if code != 0:
             error(logger, f"JMeter failed: exit code {code}")
         else:

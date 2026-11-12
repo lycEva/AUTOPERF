@@ -276,7 +276,8 @@ class MonitorLoop:
         self.interval = max(interval, MIN_MONITOR_INTERVAL_SECONDS)
         self.logger = logger
         self.timeout = timeout
-        self.warmup = 0
+        self.measurement_start_ms = None
+        self.measurement_end_ms = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -294,12 +295,15 @@ class MonitorLoop:
             self._thread.join()
 
     def _run(self) -> None:
-        if self._stop.wait(self.warmup):
+        delay = max(0, self.measurement_start_ms / 1000 - time.time()) if self.measurement_start_ms is not None else 0
+        if self._stop.wait(delay):
             return
         with self.csv_file.open("w", encoding="utf-8", newline="") as fp:
             writer = csv.DictWriter(fp, fieldnames=CSV_FIELDS)
             writer.writeheader()
             while not self._stop.is_set():
+                if self.measurement_end_ms is not None and time.time() * 1000 >= self.measurement_end_ms:
+                    break
                 values = _run_monitor_scripts(
                     self.script_dir,
                     self.container,
