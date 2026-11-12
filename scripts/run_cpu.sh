@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 set -u
+set -o pipefail
 
 container="${1:-}"
 workers="${2:-1}"
 proc_root="${CPU_PROC_ROOT:-/proc}"
 sample_seconds="${CPU_SAMPLE_SECONDS:-1}"
 
-if [ -z "$container" ] || ! command -v npu-smi >/dev/null 2>&1; then echo 0; exit 0; fi
+fail() {
+  printf 'run_cpu.sh: %s\n' "$*" >&2
+  exit 1
+}
+
+[ -n "$container" ] || fail "container is required"
+command -v npu-smi >/dev/null 2>&1 || fail "npu-smi not found"
 
 worker_pids="$(printf '%s\n' "${AUTOPERF_MONITOR_PIDS:-}" | tr ',' '\n' | awk 'NF {print $1}')"
 
@@ -21,17 +28,32 @@ worker_pids="$(docker top "$container" 2>/dev/null | awk -v limit="$workers" '
 ' | sort -k2 -nr | head -n "$workers" | awk '{print $1}')"
 fi
 
-container_pids="${AUTOPERF_MONITOR_RELATED_PIDS:-$worker_pids}"
-npu_pids="$(npu-smi info 2>/dev/null | awk '/\\|/ { n=split($0, cols, /\\|/); if (n >= 4) { pid=cols[3]; gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", pid); if (pid ~ /^[0-9]+$/) print pid } }' | sort -n | uniq)"
-worker_pids="$(comm -12 <(printf '%s\\n' \"$container_pids\" | tr ',' '\\n' | awk 'NF {print $1}' | sort -n -u) <(printf '%s\\n' \"$npu_pids\" | sort -n -u))"
-if [ -z "$worker_pids" ]; then echo 0; exit 0; fi
-
 if [ -z "$worker_pids" ]; then
   root_pid="$(docker inspect -f '{{.State.Pid}}' "$container" 2>/dev/null || true)"
   if [[ "$root_pid" =~ ^[0-9]+$ ]] && [ "$root_pid" -gt 0 ]; then
     worker_pids="$(pgrep -P "$root_pid" 2>/dev/null | head -n "$workers")"
   fi
 fi
+
+# Keep the NPU-process-only accounting, using host PIDs from both sources.
+container_pids="${AUTOPERF_MONITOR_RELATED_PIDS:-$worker_pids}"
+npu_snapshot="$(npu-smi info)" || fail "npu-smi info failed"
+npu_pids="$(printf '%s\n' "$npu_snapshot" | awk -F '[|]' '
+  NF >= 5 {
+    pid = $3
+    gsub(/^[[:space:]]+|[[:space:]]+$/, "", pid)
+    if (pid ~ /^[0-9]+$/) print pid
+  }
+')" || fail "failed to parse NPU process IDs"
+# An awk set intersection avoids comm's lexicographic-sort requirement.
+worker_pids="$(printf '%s\n---\n%s\n' "$container_pids" "$npu_pids" | tr ',' '\n' | awk '
+  $0 == "---" { npu = 1; next }
+  /^[0-9]+$/ {
+    if (!npu) wanted[$0] = 1
+    else if (wanted[$0] && !seen[$0]++) print $0
+  }
+')" || fail "failed to match NPU process IDs"
+if [ -z "$worker_pids" ]; then echo 0; exit 0; fi
 
 read_cpu_total() {
   awk '/^cpu / {

@@ -9,7 +9,7 @@ from pathlib import Path
 import json
 
 from . import __version__
-from .config import DEFAULT_CONTAINER_CONFIG_DIR, DEFAULT_JMX_TEMPLATE, DEFAULT_SCRIPTS_DIR, build_existing_run_config, build_run_config
+from .config import DEFAULT_CONTAINER_CONFIG_DIR, DEFAULT_JMX_TEMPLATE, DEFAULT_SCRIPTS_DIR, default_container_config_dir, build_existing_run_config, build_run_config
 from .docker_utils import (
     check_docker_available,
     docker_cp_server_config,
@@ -538,6 +538,8 @@ def _generate_jmeter_aggregate_safely(jtl_file: Path, html_file: Path, csv_file:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if hasattr(args, "container_config_dir") and args.container_config_dir is None:
+        args.container_config_dir = default_container_config_dir(args.server_name)
     try:
         return args.func(args)
     except AutoPerfError as exc:

@@ -16,7 +16,11 @@ def _default_path(relative: str) -> Path:
     return PACKAGE_ROOT / relative
 
 
-DEFAULT_CONTAINER_CONFIG_DIR = "/hexapp/conf"
+DEFAULT_CONTAINER_CONFIG_DIR = None  # Resolved from --server-name after argument parsing.
+
+
+def default_container_config_dir(server_name: str) -> str:
+    return f"/hexapp/ai-{server_name}-serving/conf"
 
 
 DEFAULT_SCRIPTS_DIR = _default_path("scripts")

@@ -362,7 +362,7 @@ AI 配置参数如下：
 }
 ```
 
-容器内配置目录默认为 `/hexapp/conf`，目标文件为 `/hexapp/conf/server_config.json`。
+容器内配置目录默认为 `/hexapp/ai-<服务名称>-serving/conf`（服务名称取自 `--server-name`），目标文件为该目录下的 `server_config.json`。
 `run`、`check` 和 `update-server-config` 均支持 `--container-config-dir`（也支持 `-container-config-dir`）。
 旧目录结构可显式指定，例如：
 

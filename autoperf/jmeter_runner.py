@@ -36,6 +36,11 @@ def run_jmeter(
             "-Jsampleresult.timestamp.start=true",
         ])
     logger.info("[INFO] Starting JMeter")
+    if on_test_start is not None:
+        logger.info(
+            "[INFO] JMeter summary includes warmup and does not reset; "
+            "the generated aggregate report excludes warmup requests."
+        )
     logger.debug("JMeter command: %s", " ".join(cmd))
     try:
         process = subprocess.Popen(
@@ -52,7 +57,10 @@ def run_jmeter(
     started = False
     try:
         for line in process.stdout:
-            logger.info(line.rstrip())
+            output = line.rstrip()
+            if on_test_start is not None and re.match(r"^summary\s+[+=](?:\s|$)", output):
+                output = "[JMeter raw summary, may include warmup] " + output
+            logger.info(output)
             match = re.search(r"Starting (?:the|standalone) test @ .*\((\d+)\)", line)
             if match and not started and on_test_start is not None:
                 started = True
