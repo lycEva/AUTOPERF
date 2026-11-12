@@ -33,6 +33,7 @@ class RunConfig:
     service_threads: int
     threads: int
     duration: int
+    warmup: int
     output: Path
     run_scripts: Path
     jmeter_bin: str
@@ -73,6 +74,7 @@ class ExistingRunConfig:
     workers: int
     threads: int
     duration: int
+    warmup: int
     output: Path
     run_scripts: Path
     jmeter_bin: str
@@ -127,6 +129,7 @@ def build_run_config(args) -> RunConfig:
         service_threads=args.service_threads,
         threads=args.threads,
         duration=args.duration,
+        warmup=args.warmup,
         output=output,
         run_scripts=Path(args.run_scripts).resolve() if args.run_scripts else DEFAULT_SCRIPTS_DIR.resolve(),
         jmeter_bin=args.jmeter_bin,
@@ -172,6 +175,7 @@ def build_existing_run_config(args) -> ExistingRunConfig:
         workers=args.workers,
         threads=args.threads,
         duration=args.duration,
+        warmup=args.warmup,
         output=output,
         run_scripts=Path(args.run_scripts).resolve() if args.run_scripts else DEFAULT_SCRIPTS_DIR.resolve(),
         jmeter_bin=args.jmeter_bin,

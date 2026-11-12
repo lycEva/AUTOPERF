@@ -63,6 +63,8 @@ autoperf run \
 autoperf run ... --jmx /path/to/custom.jmx
 ```
 
+JMeter 请求端口默认从 `autoperf/service_ports.json` 按服务名读取。当前映射为 `fs: 58096`、`bsocr: 58028`、`tableocr: 56010`、`pygeneral: 58080`、`solarpanel: 58066`。修改该文件后，后续运行会持续使用新端口，无需每次传参。`run` 使用 `--server-name` 匹配服务名，`run-existing` 使用 `--container` 匹配；未匹配时保留 JMX 文件中的端口。也可用 `--port` 在某次执行时覆盖映射，例如 `--port 58097`。覆盖和映射仅修改本次生成的 JMX 副本，原 JMX 不变。端口写入 JMeter HTTP 请求采样器的 `HTTPSampler.port` 属性。
+
 对已经启动好的服务压测并监控，不修改服务配置、不重启容器：
 
 ```bash
@@ -78,6 +80,26 @@ autoperf run-existing \
   --monitor-timeout 60 \
   --test-name api-a
 ```
+
+## 预热时间
+
+`run` 和 `run-existing` 支持可选参数 `--warmup SECONDS`，单位为秒，必须为非负整数，默认 `0`。`--duration` 仍表示预热结束后的正式测量时长；不设置预热时保持原有行为。
+
+例如，对已有服务预热 120 秒，再正式测量 600 秒：
+
+```bash
+autoperf run-existing \
+  --container ai-fs-serving \
+  --workers 4 \
+  --threads 50 \
+  --duration 600 \
+  --warmup 120 \
+  --output /root/test/results
+```
+
+JMeter 配置的总施压时长为 `120 + 600 = 720` 秒，启动和报告生成另需少量时间。预热期间持续发送请求，监控在预热等待结束后开始记录样本。
+
+**当前限制：预热请求仍写入 `result.jtl`，聚合报告也仍包含这些请求。预热请求的聚合过滤尚未实现，因此当前请求性能统计覆盖整个施压阶段。**
 
 ## 执行流程
 
@@ -181,7 +203,8 @@ autoperf update-scripts \
 | `--workers` | 是 | - | 当前服务实际运行的 worker 进程数，只用于监控脚本选择服务 PID，不会修改服务配置。 |
 | `--jmx` | 否 | `templates/base.jmx` | JMeter JMX 模板或测试计划路径。工具会复制并修改副本，不修改原文件。 |
 | `--threads` | 是 | - | JMeter 并发线程数，不是服务 worker 数。 |
-| `--duration` | 是 | - | JMeter 压测持续时间，单位秒。 |
+| `--duration` | 是 | - | 预热结束后的正式测量时长，单位秒；JMeter 总施压时长为该值加 `--warmup`。 |
+| `--warmup` | 否 | `0` | 预热时长，单位秒，非负整数；支持 `run` 和 `run-existing`。预热期间不记录监控样本；当前聚合报告仍包含预热请求，详见“预热时间”。 |
 | `--jmeter-bin` | 否 | `jmeter` | JMeter 可执行文件名或路径。 |
 | `--output` | 是 | - | 结果输出根目录，每次运行会在下面创建独立子目录。 |
 | `--run-scripts` | 否 | `scripts` | 监控脚本目录，需包含 `run_cpu.sh`、`run_mem.sh`、`run_npu_usage.sh`、`run_npu_mem.sh`。 |

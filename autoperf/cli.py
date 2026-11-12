@@ -6,6 +6,7 @@ import re
 import sys
 import traceback
 from pathlib import Path
+import json
 
 from . import __version__
 from .config import DEFAULT_CONTAINER_CONFIG_DIR, DEFAULT_JMX_TEMPLATE, DEFAULT_SCRIPTS_DIR, build_existing_run_config, build_run_config
@@ -85,6 +86,15 @@ def _validate_monitor_targets(container: str, targets: list[tuple[str, int]]) ->
         seen.add(name)
         require_container_exists(name)
         require_container_running(name)
+
+
+def _resolve_service_port(args, service_name: str) -> int | None:
+    if args.port is not None:
+        return args.port
+    mapping_path = Path(__file__).with_name("service_ports.json")
+    with mapping_path.open(encoding="utf-8") as fp:
+        mapping = json.load(fp)
+    return mapping.get(service_name)
 
 
 def _build_monitor_group(cfg, logger) -> MonitorGroup:
@@ -185,6 +195,7 @@ def _add_common_run_args(parser: argparse.ArgumentParser, *, include_service: bo
     parser.add_argument("--jmx", help="JMX template path, defaults to templates/base.jmx")
     parser.add_argument("--container", required=True)
     parser.add_argument("--server-name", required=True)
+    parser.add_argument("--port", type=_positive_arg("--port"), help="override JMeter HTTP sampler port (defaults to service_ports.json or the JMX port)")
     parser.add_argument("--server-config", required=True)
     parser.add_argument("--container-config-dir", "-container-config-dir", default=DEFAULT_CONTAINER_CONFIG_DIR, help="container config directory (default: %(default)s)")
     if include_service:
@@ -193,6 +204,7 @@ def _add_common_run_args(parser: argparse.ArgumentParser, *, include_service: bo
     if include_jmeter:
         parser.add_argument("--threads", required=True, type=_positive_arg("--threads"))
         parser.add_argument("--duration", required=True, type=_positive_arg("--duration"))
+        parser.add_argument("--warmup", default=0, type=int, choices=range(0, 2147483648), metavar="SECONDS", help="warmup duration before measured duration")
         parser.add_argument("--jmeter-bin", default="jmeter")
     parser.add_argument("--output", required=True)
     parser.add_argument("--run-scripts", default=str(DEFAULT_SCRIPTS_DIR))
@@ -214,9 +226,11 @@ def _add_existing_run_args(parser: argparse.ArgumentParser) -> None:
     _add_monitor_targets(parser)
     parser.add_argument("--jmx", help="JMX template path, defaults to templates/base.jmx")
     parser.add_argument("--container", required=True)
+    parser.add_argument("--port", type=_positive_arg("--port"), help="override JMeter HTTP sampler port (defaults to service_ports.json or the JMX port)")
     parser.add_argument("--workers", required=True, type=_positive_arg("--workers"))
     parser.add_argument("--threads", required=True, type=_positive_arg("--threads"))
     parser.add_argument("--duration", required=True, type=_positive_arg("--duration"))
+    parser.add_argument("--warmup", default=0, type=int, choices=range(0, 2147483648), metavar="SECONDS", help="warmup duration before measured duration")
     parser.add_argument("--jmeter-bin", default="jmeter")
     parser.add_argument("--output", required=True)
     parser.add_argument("--run-scripts", default=str(DEFAULT_SCRIPTS_DIR))
@@ -272,13 +286,17 @@ def cmd_run(args) -> int:
         refresh_pids_after_restart(cfg.container, logger)
 
         info(logger, "Updating JMX")
-        prepare_modified_jmx(cfg.jmx_template, cfg.modified_jmx, threads=cfg.threads, duration=cfg.duration)
+        port = _resolve_service_port(args, cfg.server_name)
+        config_data["jmeter_port"] = port
+        prepare_modified_jmx(cfg.jmx_template, cfg.modified_jmx, threads=cfg.threads, duration=cfg.duration + cfg.warmup, port=port)
         ok(logger, "Modified JMX generated")
         _copy_scripts_snapshot(cfg.run_scripts, cfg.output_dir / "scripts")
         _write_config(cfg.output_dir / "config.json", config_data)
 
         info(logger, "Starting monitor loop")
         monitor = _build_monitor_group(cfg, logger)
+        for item in monitor.monitors:
+            item.warmup = cfg.warmup
         monitor.start()
         code = run_jmeter(
             jmeter_bin=cfg.jmeter_bin,
@@ -328,13 +346,17 @@ def cmd_run_existing(args) -> int:
         _validate_monitor_targets(cfg.container, cfg.monitor_containers)
 
         info(logger, "Updating JMX")
-        prepare_modified_jmx(cfg.jmx_template, cfg.modified_jmx, threads=cfg.threads, duration=cfg.duration)
+        port = _resolve_service_port(args, cfg.container)
+        config_data["jmeter_port"] = port
+        prepare_modified_jmx(cfg.jmx_template, cfg.modified_jmx, threads=cfg.threads, duration=cfg.duration + cfg.warmup, port=port)
         ok(logger, "Modified JMX generated")
         _copy_scripts_snapshot(cfg.run_scripts, cfg.output_dir / "scripts")
         _write_config(cfg.output_dir / "config.json", config_data)
 
         info(logger, "Starting monitor loop")
         monitor = _build_monitor_group(cfg, logger)
+        for item in monitor.monitors:
+            item.warmup = cfg.warmup
         monitor.start()
         code = run_jmeter(
             jmeter_bin=cfg.jmeter_bin,

@@ -276,6 +276,7 @@ class MonitorLoop:
         self.interval = max(interval, MIN_MONITOR_INTERVAL_SECONDS)
         self.logger = logger
         self.timeout = timeout
+        self.warmup = 0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -293,6 +294,8 @@ class MonitorLoop:
             self._thread.join()
 
     def _run(self) -> None:
+        if self._stop.wait(self.warmup):
+            return
         with self.csv_file.open("w", encoding="utf-8", newline="") as fp:
             writer = csv.DictWriter(fp, fieldnames=CSV_FIELDS)
             writer.writeheader()

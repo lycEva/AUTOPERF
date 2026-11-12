@@ -6,14 +6,14 @@ from pathlib import Path
 from .utils import AutoPerfError, copy_file, ensure_file
 
 
-def prepare_modified_jmx(template: Path, output_file: Path, *, threads: int, duration: int) -> Path:
+def prepare_modified_jmx(template: Path, output_file: Path, *, threads: int, duration: int, port: int | None = None) -> Path:
     ensure_file(template, "JMX template")
     copy_file(template, output_file)
-    update_jmx(output_file, output_file, threads=threads, duration=duration)
+    update_jmx(output_file, output_file, threads=threads, duration=duration, port=port)
     return output_file
 
 
-def update_jmx(source: Path, output_file: Path, *, threads: int, duration: int) -> Path:
+def update_jmx(source: Path, output_file: Path, *, threads: int, duration: int, port: int | None = None) -> Path:
     if threads < 1:
         raise AutoPerfError("--threads must be a positive integer")
     if duration < 1:
@@ -28,6 +28,7 @@ def update_jmx(source: Path, output_file: Path, *, threads: int, duration: int) 
     changed_threads = 0
     changed_duration = 0
     changed_scheduler = 0
+    changed_port = 0
 
     for elem in root.iter():
         name = elem.attrib.get("name")
@@ -40,12 +41,14 @@ def update_jmx(source: Path, output_file: Path, *, threads: int, duration: int) 
         elif name == "ThreadGroup.scheduler":
             elem.text = "true"
             changed_scheduler += 1
+        elif port is not None and name in {"HTTPSampler.port", "HTTPSamplerBase.port"}:
+            elem.text = str(port)
+            changed_port += 1
 
     if changed_threads == 0:
         raise AutoPerfError("JMX missing ThreadGroup.num_threads")
     if changed_duration == 0:
         raise AutoPerfError("JMX missing ThreadGroup.duration")
-
     output_file.parent.mkdir(parents=True, exist_ok=True)
     tree.write(output_file, encoding="utf-8", xml_declaration=True)
     return output_file
