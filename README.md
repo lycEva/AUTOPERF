@@ -48,12 +48,15 @@ autoperf run \
   --service-threads 8 \
   --threads 50 \
   --duration 600 \
+  --warmup 120 \
   --output /root/test/results \
   --run-scripts /root/test/run_scripts \
   --interval 2 \
   --monitor-timeout 60 \
   --ready-log-pattern "Booting worker"
 ```
+
+上例先预热 120 秒，再正式测量 600 秒，总施压时间为 720 秒；启动和报告生成另需少量时间。预热期间持续施压，不计入聚合报告、不记录监控样本。`--warmup` 可省略，默认 `0`，保持原有行为。详见[预热时间](#预热时间)。
 
 默认使用内置 JMX 模板 `templates/base.jmx`。运行时会复制模板到本次结果目录，只修改副本，不修改原始模板。
 
@@ -74,12 +77,15 @@ autoperf run-existing \
   --jmx /root/test/api_a.jmx \
   --threads 50 \
   --duration 600 \
+  --warmup 120 \
   --output /root/test/results \
   --run-scripts /root/test/run_scripts \
   --interval 2 \
   --monitor-timeout 60 \
   --test-name api-a
 ```
+
+上例同样包含 120 秒预热和 600 秒正式测量，`--duration 600` 不包含预热时间。
 
 ## 预热时间
 
@@ -356,7 +362,6 @@ AI 配置参数如下：
 }
 ```
 
-<<<<<<< HEAD
 容器内配置目录默认为 `/hexapp/conf`，目标文件为 `/hexapp/conf/server_config.json`。
 `run`、`check` 和 `update-server-config` 均支持 `--container-config-dir`（也支持 `-container-config-dir`）。
 旧目录结构可显式指定，例如：
@@ -366,11 +371,6 @@ AI 配置参数如下：
 ```
 
 `--server-name` 不再决定容器内配置路径；`--server-config` 仍指定宿主机上的配置文件。
-=======
-`--server-config` 必须指定宿主机上的配置文件路径。容器内目标路径默认为
-`/hexapp/ai-<server-name>-serving/conf/server_config.json`，例如 `--server-name fs`
-时为 `/hexapp/ai-fs-serving/conf/server_config.json`。
->>>>>>> 3d302bf (更新监控脚本)
 
 配置推送后必须重启容器。容器重启后，旧的 root PID 和子进程 PID 会失效，工具会重新获取。
 
