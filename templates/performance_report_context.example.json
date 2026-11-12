@@ -13,7 +13,7 @@
   "participants": [
     {
       "role": "参与人员",
-      "name": "刘雨晨",
+      "name": "tester",
       "responsibility": "性能测试与结果分析"
     }
   ],
